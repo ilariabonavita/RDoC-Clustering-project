@@ -1,0 +1,344 @@
+---
+title: "RDoc_pca_report"
+author: "Ilaria Bonavita"
+date: "25 May 2018"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# PCA on MARS variables assigned to RDoc domains 
+In this analysis we aim at assessing the validity of assignment of MARS variable to RDoC domains (constructs and subconstructs) through PCA.
+The original datasets contains 1418 subjects and 149 features (phenotypes). However, due to the high number of missing phenotypes, in order not to reduce the sample size dramatically, we included only variables belonging to the SCL-90-R, tpq and life event (el) scales. 
+Moreover, we summed all the el variables in a single more informative feature and we removed the SCL-90-R and tpq variables that represent subscale, retaining only the single item variables.
+The final datatest has 292 samples and 65 variables:
+
+```{r data, echo=F, include=F, cache=FALSE}
+#--- libraries
+library("FactoMineR")
+library("factoextra")
+library("corrplot")
+library("nsprcomp")
+library("elasticnet")
+
+
+#--- load data
+file.name <- './rdoc_phenotypes_elsum_rev_nosubscale.txt'
+pheno <- read.table(file.name,h=T, stringsAsFactors = F)
+pheno.data <- pheno[1:292, 3:ncol(pheno)]
+```
+The number of variables assigned to negative valence, positive valence, system for social processes, cognitive system and arousal is the following:
+```{r data1, echo=F}
+table(as.factor(unlist(lapply(pheno[293,3:ncol(pheno)],as.factor))))
+exp <- "elsum_rev_nosubscale_FINAL"
+```
+### Variance explained by the PCs
+At first, we can do a PCA on all the variables:
+```{r pcan1, echo=F}
+pheno.data <- sapply(pheno.data,as.integer)
+pheno.pca <- PCA(pheno.data, ncp=ncol(pheno.data), graph = F)
+#--- get the eigenvalues
+eig.val <- get_eigenvalue(pheno.pca)
+
+#--- plot istograms of explained variance per PC
+#pdf(paste0('./var_explained_',exp,'.pdf'))
+fviz_eig(pheno.pca, addlabels = TRUE, ncp=20, ylim = c(0, 50))
+#dev.off()
+
+```
+
+### Quality of the representation
+The quality of representation of the variables on factor map is indicated by cos2 (square cosine, squared coordinates) 
+We can visualize the cos2 of variables on all the dimensions:
+
+```{r var,echo=F}
+#--- graph of variables
+#------------------------------------
+var <- get_pca_var(pheno.pca)
+#pdf(paste0('./var_cor_',exp,'.pdf'))
+corrplot(var$cos2, is.corr=FALSE, title = "variables on factor map cos2",mar = c(0,0,1,0), tl.cex = 0.7)
+#dev.off()
+```
+
+The correlation between a variable and a principal component (PC) is used as the coordinates of the variable on the PC. Here we can see the quality of the factor map by coloring the degree
+
+```{r cos2color, echo=F}
+#pdf(paste0('./var_pca_cos2_02_',exp ,'.pdf'))
+fviz_pca_var(pheno.pca, col.var = "cos2",
+             select.var = list(cos2 = 0.2),
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"), 
+             labelsize=3,
+             geom.var = c('point','text'),
+             title='Variables - PCA',
+             repel = TRUE # Avoid text overlapping
+)
+#dev.off()
+
+```
+Note that:
+ - Positively correlated variables are grouped together.
+ - Negatively correlated variables are positioned on opposite sides of the plot origin (opposed quadrants).
+ - The distance between variables and the origin measures the quality of the variables on the factor map. Variables that are away from the origin are well represented on the factor map.
+ - A high cos2 indicates a good representation of the variable on the principal component. 
+ - A low cos2 indicates that the variable is not perfectly represented by the PCs. 
+
+
+### Contributions of variables to PC1 and PC2
+The contributions of variables in accounting for the variability in a given principal component are expressed in percentage.
+- Variables that are correlated with PC1 (i.e., Dim.1) and PC2 (i.e., Dim.2) are the most important in explaining the variability in the data set.
+- Variables that do not correlated with any PC or correlated with the last dimensions are variables with low contribution and might be removed to simplify the overall analysis.
+
+```{r contr, echo=F}
+# Use  corrplot() [corrplot package] to highlight the most contributing variables for each dimension:
+#pdf(paste0('./var_contribution',exp,'.pdf'))
+corrplot(var$contrib, is.corr=FALSE, title = "variables on factor map contribution",mar = c(0,0,1,0))
+#dev.off()
+
+# Contributions of variables to PC1
+#pdf(paste0('./contribution_var_to_dim1',exp,'.pdf'))
+fviz_contrib(pheno.pca, choice = "var", axes = 1, top = 50)
+#dev.off()
+# Contributions of variables to PC2
+#pdf(paste0('./contribution_var_to_dim2_',exp,'.pdf'))
+fviz_contrib(pheno.pca, choice = "var", axes = 2, top = 50)
+#dev.off()
+
+```
+The 20 most important contributing variables are highlighten in the plot:
+
+```{r contrplo,echo=F}
+# The most important (or, contributing) variables can be highlighted on the correlation plot as follow:
+#pdf(paste0('./var_pca_contr_top20_',exp,'.pdf'))
+fviz_pca_var(pheno.pca, col.var = "contrib",
+             select.var = list(contrib = 20),
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),alpha.var = "contrib",
+             labelsize=3,
+             geom.var = c('point','text'),
+             title='Variables - PCA, 0.2 contrib threshold'
+             
+)
+#dev.off()
+```
+
+### Grouping variables according to RDoC assignment
+
+```{r rdoc, echo=F}
+grp <- pheno[293,]
+names(grp) <- colnames(pheno)
+grp <- grp[-c(1,2)]
+grp <- unlist(lapply(grp,as.factor))
+
+# Color variables by groups
+#pdf(paste0('./var_pca_contr_rdoc_',exp,'.pdf'))
+fviz_pca_var(pheno.pca, col.var = grp,
+             #palette = c("#0073C2FF", "#EFC000FF", "#868686FF"),
+             legend.title = "Rdoc")
+#dev.off()
+```
+
+
+## Graph of individuals
+
+We can check the effect of the sex in the PCA results:
+
+```{r gender, echo=F}
+#pdf(paste0('./individuls_',exp,'.pdf'))
+fviz_pca_ind(pheno.pca,
+             axes=c(1,2),
+             geom.ind = "point", # show points only (nbut not "text")
+             col.ind = as.factor(pheno$k_sex[-293]), # color by groups
+             palette = c("#00AFBB", "#E7B800", "#FC4E07"),
+             addEllipses = TRUE, # Concentration ellipses
+             legend.title = "Groups colored by sex"
+)
+#dev.off()
+```
+
+And the effect of age:
+
+```{r age, echo=F}
+# Age clusters
+age <- rep(0, nrow(pheno.data))
+names(age) <- rownames(pheno.data)
+age[which(pheno$age<=30)] <- "less30"
+age[which(pheno$age>=60)] <- "more60"
+age[which(pheno$age>30 & pheno$age<60)] <- "less60more30"
+age[which(age=="0")] <- ">45 <60"
+table(age)
+
+#pdf(paste0('./individuls_age',exp,'.pdf'))
+fviz_pca_ind(pheno.pca,
+             axes=c(1,2),
+             geom.ind = "point", # show points only (nbut not "text")
+             col.ind = as.factor(age[-293]), # color by groups
+            # palette = c("#00AFBB", "#E7B800", "#FC4E07"),
+             addEllipses = T, # Concentration ellipses
+             legend.title = "Groups age"
+)
+#dev.off()
+```
+
+## PCA on each RDoC-assigned variables
+
+### Negative valence
+
+```{r negpca,echo=F}
+negative <- pheno.data[,which(colnames(pheno.data) %in% colnames(pheno)[which(pheno[293,]=="neg")])]
+dim(negative)
+negative.pca <- PCA(negative, ncp=ncol(negative),graph = F)
+eig.val <- get_eigenvalue(negative.pca)
+exp <- "elsum_rev_nosubscale_negative_FINAL"
+#pdf(paste0('./var_explained_',exp,'.pdf'))
+fviz_eig(negative.pca, addlabels = TRUE, ncp=20, ylim = c(0, 50),main="Variance explained - Negative valence")
+#dev.off()
+var <- get_pca_var(negative.pca)
+#pdf(paste0('./var_pca_',exp ,'.pdf'))
+fviz_pca_var(negative.pca, col.var = "cos2",
+             #select.var = list(cos2 = 0.2),
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"), 
+             labelsize=3,
+             geom.var = c('point','text'),
+             title='Variables - PCA, Negative Valence',
+             repel = TRUE # Avoid text overlapping
+)
+#dev.off()
+
+# Contributions of variables to PC1
+#pdf(paste0('./contribution_var_to_dim1',exp,'.pdf'))
+fviz_contrib(negative.pca, choice = "var", axes = 1, top = 50)
+#dev.off()
+# Contributions of variables to PC2
+#pdf(paste0('./contribution_var_to_dim2_',exp,'.pdf'))
+fviz_contrib(negative.pca, choice = "var", axes = 2, top = 50)
+#dev.off()
+grp <- rep(0, ncol(negative))
+names(grp) <- colnames(negative)
+grp[which(names(grp) %in% "scl0_50")] <-'fear'
+grp[which(names(grp) %in% c("scl0_31", "scl0_80", "tpq005"))] <-"anxiety"
+grp[which(names(grp) %in% c("scl0_02","scl0_17","scl0_04","scl0_12","scl0_48","scl0_49","scl0_53","scl0_19","scl0_05","scl0_32"))] <- "threat"
+grp[which(names(grp) %in% c("el_sum","scl0_54","scl0_20","scl0_89"))] <- "loss"
+grp[which(names(grp) %in% c('scl0_76','tpq079_rev'))] <- 'frustnonrew'
+#pdf(paste0('./var_pca_contr_subgroups_',exp,'.pdf'))
+fviz_pca_var(negative.pca, col.var = grp, select.var = list(contrib=50),
+             #palette = c("#0073C2FF", "#EFC000FF", "#868686FF"),
+             title='Variables - PCA - Negative valence subgroups',
+             legend.title = "Rdoc subgrups")
+#dev.off()
+
+```
+
+
+### Positive valence
+```{r pospca,echo=F}
+positive <- pheno.data[,which(colnames(pheno.data) %in% colnames(pheno)[which(pheno[293,]=="pos")])]
+dim(positive)
+positive <- positive[, -which(colnames(positive) %in% c("tpq040","tpq045","tpq049","tpq053","tpq096"))]
+positive <- as.matrix(positive)
+positive.pca <- PCA(positive, ncp=ncol(positive),graph = F)
+eig.val <- get_eigenvalue(positive.pca)
+exp <- "elsum_rev_nosubscale_positive_FINAL"
+
+#pdf(paste0('./var_explained_',exp,'.pdf'))
+fviz_eig(positive.pca, addlabels = TRUE, ncp=20, ylim = c(0, 50),main="Variance explained - Positive valence")
+#dev.off()
+
+var <- get_pca_var(positive.pca)
+#pdf(paste0('./var_pca_',exp ,'.pdf'))
+fviz_pca_var(positive.pca, col.var = "cos2",
+             #select.var = list(cos2 = 0.2),
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"), 
+             labelsize=3,
+             geom.var = c('point','text'),
+             title='Variables - PCA, Positive Valence',
+             repel = TRUE # Avoid text overlapping
+)
+#dev.off()
+
+# Contributions of variables to PC1
+#pdf(paste0('./contribution_var_to_dim1',exp,'.pdf'))
+fviz_contrib(positive.pca, choice = "var", axes = 1, top = 50)
+#dev.off()
+
+# Contributions of variables to PC2
+#pdf(paste0('./contribution_var_to_dim2_',exp,'.pdf'))
+fviz_contrib(positive.pca, choice = "var", axes = 2, top = 50)
+#dev.off()
+
+grp <- rep(0, ncol(positive))
+names(grp) <- colnames(positive)
+grp[which(names(grp) %in% c("tpq052","tpq039","tpq041","tpq045_rev","tpq049_rev","tpq053_rev","tpq092","tpq097","tpq046","tpq079","tpq077","scl0_46"))] <- "motiv"
+grp[which(names(grp) %in% c( "scl0_19_rev","scl0_05_rev","scl0_32_rev","tpq002","tpq004", "tpq040_rev","tpq096_rev"))] <- 'initial_rew'
+grp[which(names(grp) %in% c( "scl0_60","tpq070","tpq072"))] <- "sustained_rew"
+grp[which(names(grp) %in% "tpq077_rev")] <- "rew_leaern"
+grp[which(names(grp) %in% c("scl0_65" , "tpq085" , "tpq011", "tpq009"))] <- "habit"
+table(grp)
+
+#pdf(paste0('./var_pca_contr_subgroups_',exp,'.pdf'))
+fviz_pca_var(positive.pca, col.var = grp, 
+             #select.var = tokeep,
+             #palette = c("#0073C2FF", "#EFC000FF", "#868686FF"),
+             title='Variables - PCA - Positive valence subgroups',
+             legend.title = "Rdoc")
+#dev.off()
+
+```
+
+### Cognitive System, Systems for Social Process and Arousal
+
+```{r otherspca,echo=F}
+rdoc345 <- pheno.data[,which(colnames(pheno.data) %in% colnames(pheno)[which(pheno[293,]=="cogn" | pheno[293,]=="arou" | pheno[293,]=="social")])]
+rdoc345.pca <- PCA(rdoc345, ncp=ncol(rdoc345),graph = F)
+eig.val <- get_eigenvalue(rdoc345.pca)
+exp <- "elsum_rev_nosubscale_rdoc345_FINAL"
+
+#pdf(paste0('./var_explained_',exp,'.pdf'))
+fviz_eig(rdoc345.pca, addlabels = TRUE, ncp=20, ylim = c(0, 50),main="Variance explained - Cognitive, Social, Arousal")
+#dev.off()
+
+var <- get_pca_var(rdoc345.pca)
+#pdf(paste0('./var_pca_',exp ,'.pdf'))
+fviz_pca_var(rdoc345.pca, col.var = "cos2",
+             #select.var = list(cos2 = 0.2),
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"), 
+             labelsize=3,
+             geom.var = c('point','text'),
+             title='Variables - PCA, Cognitive, Social, Arousal',
+             repel = TRUE # Avoid text overlapping
+)
+#dev.off()
+
+# Contributions of variables to PC1
+#pdf(paste0('./contribution_var_to_dim1',exp,'.pdf'))
+fviz_contrib(positive.pca, choice = "var", axes = 1, top = 50)
+#dev.off()
+
+# Contributions of variables to PC2
+#pdf(paste0('./contribution_var_to_dim2_',exp,'.pdf'))
+fviz_contrib(positive.pca, choice = "var", axes = 2, top = 50)
+#dev.off()
+
+grp <- rep(0, ncol(rdoc345))
+names(grp) <- colnames(rdoc345)
+grp[which(names(grp) %in% c( "scl0_51", "scl0_55","tpq043"))] <- 'general'
+grp[which(names(grp) %in% c( "scl0_16"))] <- 'percep'
+grp[which(names(grp) %in% c( "scl0_09"))] <- 'mem'
+grp[which(names(grp) %in% c("scl0_38","scl0_45" ))] <- 'lang'
+grp[which(names(grp) %in% c("tpq031", "tpq012", "tpq086"  ,"tpq088" ))] <- 'social'
+grp[which(names(grp) %in% c("scl0_66","scl0_44"))] <- "sleep"
+table(grp)
+
+#pdf(paste0('./var_pca_contr_subgroups_',exp,'.pdf'))
+fviz_pca_var(rdoc345.pca, col.var = grp, 
+             #select.var = tokeep,
+             #palette = c("#0073C2FF", "#EFC000FF", "#868686FF"),
+             title='Variables - PCA - Cognitive, Social, Arousal subgroups',
+             legend.title = "Rdoc")
+#dev.off()
+
+```
+
+
